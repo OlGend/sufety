@@ -1,0 +1,20 @@
+import Image from "next/image";
+import Link from "next/link";
+
+const Logo: React.FC = () => {
+  return (
+    <Link href="/">
+      <Image
+      className="max-w-[160]"
+        src="/images/logo/logi.png"
+        alt="logo"
+        width={160}
+        height={50}
+        style={{ width: "auto", height: "auto" }}
+        quality={100}
+      />
+    </Link>
+  );
+};
+
+export default Logo;
