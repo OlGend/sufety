@@ -3,95 +3,104 @@ import Hero from "@/app/components/Home/Hero";
 import Companies from "@/app/components/Home/Companies";
 import Courses from "@/app/components/Home/Courses";
 import Newsletter from "@/app/components/Home/Newsletter";
+import Frame from "@/app/components/Frame";
+import { getUserCountry } from "../app/lib/geo";
+import { CookieWriter } from "@/app/components/CookieWriter";
 import { cookies } from "next/headers";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = { title: "Sufety Game VIP" };
+export const dynamic = "force-dynamic"; // не валим билд, если внешка шатает
 
-// --------- тип для пропсов в Hero/Platform ---------
+// --------- тип для пропсов в Hero/Frame/др. ---------
 type BrandPair = {
   brand: { brand_logo: string; casino_brand: string; id?: string | number };
-  content: { value: string; our_link: string };
+  content: { value: string; our_link: string; geo: string };
 };
 
-export default async function Home() {
+const ALLOWED = ["partner1039", "partner1043", "partner1044", "partner1045", "partnerCLD"];
+
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: Promise<{ partner?: string; keyword?: string; ad_campaign_id?: string }>;
+}) {
+  const sp = (await searchParams) || {};
   const cookieStore = await cookies();
 
-  const partner_id = cookieStore.get("partnerId")?.value ?? "partner1039";
-  const keyword = cookieStore.get("rawKeyword")?.value ?? "";
-  const ad_campaign_id = cookieStore.get("ad_campaign_id")?.value ?? "";
+  // Приоритет: URL → cookies → fallback
+  const urlPartner = sp.partner && ALLOWED.includes(sp.partner) ? sp.partner : null;
 
-  const hottest = `https://born.topbon.us/end/fetch/brand_fetcher.php?partner_id=${encodeURIComponent(
-    partner_id
-  )}&geo=CA&category=Hottest`;
-  const popular = `https://born.topbon.us/end/fetch/brand_fetcher.php?partner_id=${encodeURIComponent(
-    partner_id
-  )}&geo=CA&category=Popular`;
-  const vip = `https://born.topbon.us/end/fetch/brand_fetcher.php?partner_id=${encodeURIComponent(
-    partner_id
-  )}&geo=CA&category=Vip`;
+  const partner_id = urlPartner || cookieStore.get("partnerId")?.value || "partner1000";
+  const keyword = sp.keyword || cookieStore.get("rawKeyword")?.value || "";
+  const ad_campaign_id = sp.ad_campaign_id || cookieStore.get("ad_campaign_id")?.value || "";
 
-  const res = await fetch(hottest, { next: { revalidate: 300 } });
-  if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
-  const data: any[] = await res.json();
+  const geo = await getUserCountry();
 
-  const res2 = await fetch(popular, { next: { revalidate: 300 } });
-  if (!res2.ok) throw new Error(`fetch failed: ${res2.status}`);
-  const data2: any[] = await res2.json();
+  const buildUrl = (category: string) =>
+    `https://born.topbon.us/end/fetch/brand_fetcher.php?partner_id=${encodeURIComponent(
+      partner_id
+    )}&geo=${geo}&category=${category}`;
 
-  const res3 = await fetch(vip, { next: { revalidate: 300 } });
-  if (!res3.ok) throw new Error(`fetch failed: ${res3.status}`);
-  const data3: any[] = await res3.json();
+  const safeFetch = async (url: string) => {
+    try {
+      const r = await fetch(url, { next: { revalidate: 300 } });
+      if (!r.ok) return [];
+      const json = await r.json();
+      return Array.isArray(json) ? json : [];
+    } catch {
+      return [];
+    }
+  };
 
-  const processedBrandsHottest = processDataNoGeo(data, partner_id);
-  const processedBrandsPopular = processDataNoGeo(data2, partner_id);
-  const processedBrandsVip = processDataNoGeo(data3, partner_id);
+  const [dataHottest, dataPopular, dataVip] = await Promise.all([
+    safeFetch(buildUrl("Hottest")),
+    safeFetch(buildUrl("Popular")),
+    safeFetch(buildUrl("Vip")),
+  ]);
+
+  const processedBrandsHottest = processDataNoGeo(dataHottest, partner_id, geo);
+  const processedBrandsPopular = processDataNoGeo(dataPopular, partner_id, geo);
+  const processedBrandsVip = processDataNoGeo(dataVip, partner_id, geo);
 
   return (
     <main>
+      <CookieWriter />
+
+      <Frame
+        brands={processedBrandsVip}
+        keyword={keyword}
+        partnerId={partner_id}
+        adCampaignId={ad_campaign_id}
+      />
+
       <Hero
         brands={processedBrandsHottest}
         keyword={keyword}
         partnerId={partner_id}
         ad_campaign_id={ad_campaign_id}
       />
+
       <Companies
         brands={processedBrandsPopular}
         keyword={keyword}
         partnerId={partner_id}
         ad_campaign_id={ad_campaign_id}
       />
+
       <Courses
         brands={processedBrandsVip}
         keyword={keyword}
         partnerId={partner_id}
         ad_campaign_id={ad_campaign_id}
       />
-   
+
       <Newsletter />
     </main>
   );
 }
 
 // ---------- helpers ----------
-function parseJson(v: unknown) {
-  if (!v) return null;
-  if (typeof v === "string") {
-    try {
-      return JSON.parse(v);
-    } catch {
-      return null;
-    }
-  }
-  if (typeof v === "object") return v as Record<string, unknown>;
-  return null;
-}
-
-// type guard, чтобы TS понял, что это BrandPair
-function isBrandPair(x: any): x is BrandPair {
-  return Boolean(x && x.brand && x.content && x.content.our_link);
-}
-
 type LangContent = { geo?: string; value?: string; our_link?: string };
 type LangBlock = {
   partner_id?: string;
@@ -99,10 +108,7 @@ type LangBlock = {
   content?: LangContent[];
 };
 
-function pickLangBlock(
-  languages: unknown,
-  partnerId: string
-): LangBlock | null {
+function pickLangBlock(languages: unknown, partnerId: string): LangBlock | null {
   const arr: LangBlock[] = Array.isArray(languages)
     ? (languages as LangBlock[])
     : typeof languages === "string"
@@ -110,9 +116,7 @@ function pickLangBlock(
     : [];
   if (!arr.length) return null;
   return (
-    arr.find(
-      (l) => (l.partner_id || "").toLowerCase() === partnerId.toLowerCase()
-    ) ||
+    arr.find((l) => (l.partner_id || "").toLowerCase() === partnerId.toLowerCase()) ||
     arr.find((l) => (l.partner_id || "").toLowerCase() === "partner1039") ||
     arr[0] ||
     null
@@ -130,11 +134,7 @@ function pickContent(block: LangBlock | null, geo: string): LangContent | null {
   );
 }
 
-function processDataNoGeo(
-  data: any[],
-  partner_id: string,
-  geo: string = "CA"
-): BrandPair[] {
+function processDataNoGeo(data: any[], partner_id: string, geo: string = "CA"): BrandPair[] {
   if (!Array.isArray(data)) return [];
   const shuffled = [...data];
   for (let i = shuffled.length - 1; i > 0; i--) {
@@ -154,7 +154,11 @@ function processDataNoGeo(
           brand_logo: String(brand?.brand_logo ?? ""),
           casino_brand: String(brand?.casino_brand ?? ""),
         },
-        content: { value: String(c.value ?? ""), our_link },
+        content: {
+          value: String(c.value ?? ""),
+          our_link,
+          geo: String(c.geo ?? "ALL"),
+        },
       };
     })
     .filter(Boolean) as BrandPair[];
