@@ -3,7 +3,7 @@ import Hero from "@/app/components/Home/Hero";
 import Companies from "@/app/components/Home/Companies";
 import Courses from "@/app/components/Home/Courses";
 import Newsletter from "@/app/components/Home/Newsletter";
-import Frame from "@/app/components/Frame";
+// import Frame from "@/app/components/Frame";
 import { getUserCountry } from "../app/lib/geo";
 import { CookieWriter } from "@/app/components/CookieWriter";
 import { cookies } from "next/headers";
@@ -67,12 +67,12 @@ export default async function Home({
     <main>
       <CookieWriter />
 
-      <Frame
+      {/* <Frame
         brands={processedBrandsVip}
         keyword={keyword}
         partnerId={partner_id}
         adCampaignId={ad_campaign_id}
-      />
+      /> */}
 
       <Hero
         brands={processedBrandsHottest}
